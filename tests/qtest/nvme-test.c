@@ -16,6 +16,7 @@
 #include "libqtest-single.h"
 #include "libqos/qgraph.h"
 #include "libqos/pci.h"
+#include "hw/pci/pci_regs.h"
 #include "block/nvme.h"
 
 typedef struct QNvme QNvme;
@@ -92,6 +93,46 @@ static void nvmetest_reg_read_test(void *obj, void *data, QGuestAllocator *alloc
     g_assert_cmpint(NVME_CAP_MPSMAX(cap), ==, 0x4);
 
     qpci_iounmap(pdev, bar);
+}
+
+/* Default "Red Hat" PCI vendor/device IDs used by the nvme device. */
+#define NVME_TEST_REDHAT_VENDOR_ID 0x1b36
+#define NVME_TEST_REDHAT_DEVICE_ID 0x0010
+
+/* Arbitrary values passed via the 'vendor-id'/'device-id' properties. */
+#define NVME_TEST_CUSTOM_VENDOR_ID 0x1234
+#define NVME_TEST_CUSTOM_DEVICE_ID 0x5678
+
+/*
+ * By default the device impersonates the "Red Hat" PCI IDs. qpci_device_init()
+ * has already read the IDs from config space into the QPCIDevice.
+ */
+static void nvmetest_id_default_test(void *obj, void *data,
+                                     QGuestAllocator *alloc)
+{
+    QNvme *nvme = obj;
+    QPCIDevice *pdev = &nvme->dev;
+
+    g_assert_cmpint(qpci_config_readw(pdev, PCI_VENDOR_ID), ==,
+                    NVME_TEST_REDHAT_VENDOR_ID);
+    g_assert_cmpint(qpci_config_readw(pdev, PCI_DEVICE_ID), ==,
+                    NVME_TEST_REDHAT_DEVICE_ID);
+}
+
+/*
+ * The 'vendor-id'/'device-id' properties override the PCI IDs exposed in
+ * config space, allowing the device to impersonate other controllers.
+ */
+static void nvmetest_id_override_test(void *obj, void *data,
+                                      QGuestAllocator *alloc)
+{
+    QNvme *nvme = obj;
+    QPCIDevice *pdev = &nvme->dev;
+
+    g_assert_cmpint(qpci_config_readw(pdev, PCI_VENDOR_ID), ==,
+                    NVME_TEST_CUSTOM_VENDOR_ID);
+    g_assert_cmpint(qpci_config_readw(pdev, PCI_DEVICE_ID), ==,
+                    NVME_TEST_CUSTOM_DEVICE_ID);
 }
 
 static void nvmetest_pmr_reg_test(void *obj, void *data, QGuestAllocator *alloc)
@@ -587,6 +628,13 @@ static void nvme_register_nodes(void)
     qos_add_test("reg-read", "nvme", nvmetest_reg_read_test, NULL);
 
     qos_add_test("migrate", "nvme", test_migrate, NULL);
+
+    qos_add_test("id-default", "nvme", nvmetest_id_default_test, NULL);
+
+    qos_add_test("id-override", "nvme", nvmetest_id_override_test,
+                 &(QOSGraphTestOptions) {
+        .edge.extra_device_opts = "vendor-id=0x1234,device-id=0x5678"
+    });
 }
 
 libqos_init(nvme_register_nodes);
