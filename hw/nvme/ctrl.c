@@ -5277,44 +5277,31 @@ static uint16_t nvme_cmd_effects(NvmeCtrl *n, uint8_t csi, uint32_t buf_len,
     return nvme_c2h(n, ((uint8_t *)&log) + off, trans_len, req);
 }
 
-static uint16_t nvme_ontap_vendor_log(NvmeCtrl *n, uint8_t rae,
-                                      uint32_t buf_len, uint64_t off,
-                                      NvmeRequest *req, uint8_t lsp)
+static uint16_t nvme_vendor_log_file(NvmeCtrl *n, uint8_t rae,
+                                     uint32_t buf_len, uint64_t off,
+                                     NvmeRequest *req, uint8_t lsp)
 {
-    uint8_t log[4096] = { 0 };
     uint32_t trans_len;
 
-    if (off >= sizeof(log)) {
-        return NVME_INVALID_FIELD | NVME_DNR;
-    }
-
-    if (lsp != 0x1) {
+    if (n->params.vendor_log_lsp != 0xFF && lsp != n->params.vendor_log_lsp) {
         trace_pci_nvme_err_invalid_log_page(nvme_cid(req),
-                                            NVME_ONTAP_VENDOR_LOG);
+                                            n->params.vendor_log_id);
         return NVME_INVALID_FIELD | NVME_DNR;
     }
 
-    trace_pci_nvme_ontap_vendor_log(nvme_cid(req), lsp);
+    if (off >= n->vendor_log_len) {
+        return NVME_INVALID_FIELD | NVME_DNR;
+    }
 
-    /* log_data[16] low nibble = 0x1 */
-    log[16] = 0x01;
-
-    /* log_data[32] = 0x11 */
-    log[32] = 0x11;
-
-    /* *(uint16_t *)&log_data[34] = 0xFFFF little-endian */
-    log[34] = 0xFF;
-    log[35] = 0xFF;
-
-    /* log_data[36] onwards: printable ASCII ('A' repeated) */
-    memset(&log[36], 'A', 64);
+    trace_pci_nvme_vendor_log_file(nvme_cid(req), n->params.vendor_log_id,
+                                   lsp);
 
     if (!rae) {
         nvme_clear_events(n, NVME_AER_TYPE_SMART);
     }
 
-    trans_len = MIN(sizeof(log) - off, buf_len);
-    return nvme_c2h(n, log + off, trans_len, req);
+    trans_len = MIN(n->vendor_log_len - off, buf_len);
+    return nvme_c2h(n, n->vendor_log_data + off, trans_len, req);
 }
 
 static uint16_t nvme_vendor_specific_log(NvmeCtrl *n, uint8_t rae,
@@ -5328,12 +5315,11 @@ static uint16_t nvme_vendor_specific_log(NvmeCtrl *n, uint8_t rae,
             return nvme_ocp_extended_smart_info(n, rae, buf_len, off, req);
         }
         break;
-    case NVME_ONTAP_VENDOR_LOG:
-        if (n->params.ontap) {
-            return nvme_ontap_vendor_log(n, rae, buf_len, off, req, lsp);
-        }
-        break;
         /* add a case for each additional vendor specific log id */
+    }
+
+    if (n->vendor_log_data && lid == n->params.vendor_log_id) {
+        return nvme_vendor_log_file(n, rae, buf_len, off, req, lsp);
     }
 
     trace_pci_nvme_err_invalid_log_page(nvme_cid(req), lid);
@@ -9689,6 +9675,30 @@ static void nvme_realize(PCIDevice *pci_dev, Error **errp)
     }
     nvme_init_ctrl(n, pci_dev);
 
+    if (n->params.vendor_log_file) {
+        g_autofree char *contents = NULL;
+        gsize len = 0;
+        GError *err = NULL;
+
+        if (!g_file_get_contents(n->params.vendor_log_file, &contents,
+                                 &len, &err)) {
+            error_setg(errp, "failed to read vendor log file '%s': %s",
+                       n->params.vendor_log_file, err->message);
+            g_error_free(err);
+            return;
+        }
+
+        if (len == 0 || len > 4096) {
+            error_setg(errp, "vendor log file must be 1-4096 bytes, got %zu",
+                       len);
+            return;
+        }
+
+        n->vendor_log_data = g_malloc0(4096);
+        memcpy(n->vendor_log_data, contents, len);
+        n->vendor_log_len = 4096;
+    }
+
     /* setup a namespace if the controller drive property was given */
     if (n->namespace.blkconf.blk) {
         ns = &n->namespace;
@@ -9727,6 +9737,7 @@ static void nvme_exit(PCIDevice *pci_dev)
     g_free(n->cq);
     g_free(n->sq);
     g_free(n->aer_reqs);
+    g_free(n->vendor_log_data);
 
     if (n->params.cmb_size_mb) {
         g_free(n->cmb.buf);
@@ -9804,7 +9815,9 @@ static const Property nvme_props[] = {
     DEFINE_PROP_UINT16("atomic.awun", NvmeCtrl, params.atomic_awun, 0),
     DEFINE_PROP_UINT16("atomic.awupf", NvmeCtrl, params.atomic_awupf, 0),
     DEFINE_PROP_BOOL("ocp", NvmeCtrl, params.ocp, false),
-    DEFINE_PROP_BOOL("ontap", NvmeCtrl, params.ontap, false),
+    DEFINE_PROP_STRING("vendor-log-file", NvmeCtrl, params.vendor_log_file),
+    DEFINE_PROP_UINT8("vendor-log-id", NvmeCtrl, params.vendor_log_id, 0),
+    DEFINE_PROP_UINT8("vendor-log-lsp", NvmeCtrl, params.vendor_log_lsp, 0xFF),
 };
 
 static void nvme_get_smart_warning(Object *obj, Visitor *v, const char *name,

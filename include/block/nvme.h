@@ -1109,33 +1109,6 @@ enum NvmeOcpLogIdentifier {
     NVME_OCP_EXTENDED_SMART_INFO = 0xc0,
 };
 
-enum NvmeOntapLogIdentifier {
-    NVME_ONTAP_VENDOR_LOG = 0xc2,
-};
-
-typedef struct QEMU_PACKED NvmeOntapVendorLog {
-    uint32_t    log_page_version;
-    uint32_t    log_page_length;
-    uint8_t     controller_status;
-    uint8_t     rebuild_status;
-    uint8_t     port_status;
-    uint8_t     reserved1;
-    uint32_t    temperature_celsius;
-    uint64_t    total_bytes_written;
-    uint64_t    total_bytes_read;
-    uint32_t    controller_busy_time;
-    uint32_t    power_on_hours;
-    uint64_t    data_units_written;
-    uint64_t    data_units_read;
-    char        ontap_version[32];
-    char        cluster_name[64];
-    char        vserver_name[64];
-    uint8_t     reserved2[3624];
-    uint16_t    log_page_guid_version;
-    uint8_t     log_page_guid[16];
-    uint8_t     padding[238];
-} NvmeOntapVendorLog;
-
 typedef struct QEMU_PACKED NvmePSD {
     uint16_t    mp;
     uint16_t    reserved;
@@ -2023,6 +1996,5 @@ static inline void _nvme_check_size(void)
     QEMU_BUILD_BUG_ON(sizeof(NvmeSecCtrlList) != 4096);
     QEMU_BUILD_BUG_ON(sizeof(NvmeEndGrpLog) != 512);
     QEMU_BUILD_BUG_ON(sizeof(NvmeDirectiveIdentify) != 4096);
-    QEMU_BUILD_BUG_ON(sizeof(NvmeOntapVendorLog) != 4096);
 }
 #endif

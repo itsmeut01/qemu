@@ -578,7 +578,9 @@ typedef struct NvmeParams {
     uint32_t  sriov_max_vi_per_vf;
     bool     msix_exclusive_bar;
     bool     ocp;
-    bool     ontap;
+    char     *vendor_log_file;
+    uint8_t  vendor_log_id;
+    uint8_t  vendor_log_lsp;
 
     struct {
         bool mem;
@@ -637,6 +639,9 @@ typedef struct NvmeCtrl {
         bool              cmse;
         hwaddr            cba;
     } pmr;
+
+    uint8_t     *vendor_log_data;
+    uint32_t    vendor_log_len;
 
     uint8_t     aer_mask;
     NvmeRequest **aer_reqs;

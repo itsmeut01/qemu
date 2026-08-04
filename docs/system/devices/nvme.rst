@@ -60,6 +60,22 @@ parameters.
   the SMART / Health information extended log become available in the
   controller. We emulate version 5 of this log page.
 
+``vendor-log-file=FILE`` (default: *not set*)
+  Path to a raw binary file (1-4096 bytes) whose contents are returned when
+  the host issues a Get Log Page command for the vendor-specific log page
+  identified by ``vendor-log-id``. The file is read once at device startup
+  and zero-padded to 4096 bytes. If not set, no vendor log file is served.
+
+``vendor-log-id=UINT8`` (default: ``0``)
+  The vendor-specific Log Page Identifier (``0xC0``-``0xFF``) that this
+  controller should respond to. Only effective when ``vendor-log-file`` is
+  also set.
+
+``vendor-log-lsp=UINT8`` (default: ``0xFF``)
+  If set to a value other than ``0xFF``, the controller only responds when
+  the Log Specific Parameter (LSP) in the Get Log Page command matches this
+  value. The default ``0xFF`` means accept any LSP.
+
 ``model`` (default: ``QEMU NVMe Ctrl``)
   Override the default reported model, which can be used when needing
   to more closely impersonate a particular device type. The model name
