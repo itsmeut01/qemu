@@ -5277,14 +5277,60 @@ static uint16_t nvme_cmd_effects(NvmeCtrl *n, uint8_t csi, uint32_t buf_len,
     return nvme_c2h(n, ((uint8_t *)&log) + off, trans_len, req);
 }
 
+static uint16_t nvme_ontap_vendor_log(NvmeCtrl *n, uint8_t rae,
+                                      uint32_t buf_len, uint64_t off,
+                                      NvmeRequest *req, uint8_t lsp)
+{
+    uint8_t log[4096] = { 0 };
+    uint32_t trans_len;
+
+    if (off >= sizeof(log)) {
+        return NVME_INVALID_FIELD | NVME_DNR;
+    }
+
+    if (lsp != 0x1) {
+        trace_pci_nvme_err_invalid_log_page(nvme_cid(req),
+                                            NVME_ONTAP_VENDOR_LOG);
+        return NVME_INVALID_FIELD | NVME_DNR;
+    }
+
+    trace_pci_nvme_ontap_vendor_log(nvme_cid(req), lsp);
+
+    /* log_data[16] low nibble = 0x1 */
+    log[16] = 0x01;
+
+    /* log_data[32] = 0x11 */
+    log[32] = 0x11;
+
+    /* *(uint16_t *)&log_data[34] = 0xFFFF little-endian */
+    log[34] = 0xFF;
+    log[35] = 0xFF;
+
+    /* log_data[36] onwards: printable ASCII ('A' repeated) */
+    memset(&log[36], 'A', 64);
+
+    if (!rae) {
+        nvme_clear_events(n, NVME_AER_TYPE_SMART);
+    }
+
+    trans_len = MIN(sizeof(log) - off, buf_len);
+    return nvme_c2h(n, log + off, trans_len, req);
+}
+
 static uint16_t nvme_vendor_specific_log(NvmeCtrl *n, uint8_t rae,
                                          uint32_t buf_len, uint64_t off,
-                                         NvmeRequest *req, uint8_t lid)
+                                         NvmeRequest *req, uint8_t lid,
+                                         uint8_t lsp)
 {
     switch (lid) {
     case NVME_OCP_EXTENDED_SMART_INFO:
         if (n->params.ocp) {
             return nvme_ocp_extended_smart_info(n, rae, buf_len, off, req);
+        }
+        break;
+    case NVME_ONTAP_VENDOR_LOG:
+        if (n->params.ontap) {
+            return nvme_ontap_vendor_log(n, rae, buf_len, off, req, lsp);
         }
         break;
         /* add a case for each additional vendor specific log id */
@@ -5545,7 +5591,7 @@ static uint16_t nvme_get_log(NvmeCtrl *n, NvmeRequest *req)
     case NVME_LOG_FW_SLOT_INFO:
         return nvme_fw_log_info(n, len, off, req);
     case NVME_LOG_VENDOR_START...NVME_LOG_VENDOR_END:
-        return nvme_vendor_specific_log(n, rae, len, off, req, lid);
+        return nvme_vendor_specific_log(n, rae, len, off, req, lid, lsp);
     case NVME_LOG_CHANGED_NSLIST:
         return nvme_changed_nslist(n, rae, len, off, req);
     case NVME_LOG_CMD_EFFECTS:
@@ -9758,6 +9804,7 @@ static const Property nvme_props[] = {
     DEFINE_PROP_UINT16("atomic.awun", NvmeCtrl, params.atomic_awun, 0),
     DEFINE_PROP_UINT16("atomic.awupf", NvmeCtrl, params.atomic_awupf, 0),
     DEFINE_PROP_BOOL("ocp", NvmeCtrl, params.ocp, false),
+    DEFINE_PROP_BOOL("ontap", NvmeCtrl, params.ontap, false),
 };
 
 static void nvme_get_smart_warning(Object *obj, Visitor *v, const char *name,
